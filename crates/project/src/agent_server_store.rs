@@ -1606,6 +1606,14 @@ impl ExternalAgentServer for LocalRegistryNpxAgent {
 /// security settings, as the args don't change often. The registry will need to support this better
 /// at some point, but until then, this is a best-effort workaround that hopefully solves the issue
 /// for most users.
+///
+/// We use npm's hyphen-range syntax (`0.0.0 - <version>`, equivalent to `<=<version>`) on purpose:
+/// on Windows, `npm` is `npm.cmd`, and the quotes our shell builder emits around args (e.g.
+/// `'package@<=0.25.3'`) are PowerShell string-literal syntax that PS strips during parsing. When
+/// PS then builds the CommandLine for the native call, it only re-adds CRT-style quotes around args
+/// containing whitespace, so `package@<=0.25.3` reaches `npm.cmd` bare; `%*` re-emits it, and
+/// cmd.exe interprets `<` as input redirection. The space in the hyphen-range form forces PS to
+/// re-quote, and those quotes survive `%*`. See zed-industries/zed#55921.
 fn bounded_npm_package_spec(package_spec: &str) -> String {
     let Some((package_name, version)) = package_spec.rsplit_once('@') else {
         return package_spec.to_string();
@@ -1614,7 +1622,7 @@ fn bounded_npm_package_spec(package_spec: &str) -> String {
         return package_spec.to_string();
     }
 
-    format!("{package_name}@<={version}")
+    format!("{package_name}@0.0.0 - {version}")
 }
 
 struct LocalCustomAgent {
@@ -2025,11 +2033,11 @@ mod tests {
     fn builds_bounded_npm_package_specs() {
         assert_eq!(
             bounded_npm_package_spec("agent-package@1.2.3"),
-            "agent-package@<=1.2.3"
+            "agent-package@0.0.0 - 1.2.3"
         );
         assert_eq!(
             bounded_npm_package_spec("@scope/agent-package@1.2.3-beta.1"),
-            "@scope/agent-package@<=1.2.3-beta.1"
+            "@scope/agent-package@0.0.0 - 1.2.3-beta.1"
         );
         assert_eq!(
             bounded_npm_package_spec("@scope/agent-package"),
